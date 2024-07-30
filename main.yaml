@@ -1,118 +1,84 @@
 ---
-- name: Automated Deployment and Configuration with Ansible
+- name: Automated Deployment and Configuration
   hosts: hng
   become: yes
   vars:
-    pg_password_file: /var/secrets/pg_pw.txt
-    pg_user: db_one_xysq_user
-    pg_password: fgYiwwTsuMhfosq3NMgBa2xToWFMIqDq
-    pg_database: db_one_xysq
-    pg_host: dpg-cqc2ds2j1k6c73fs2r20-a.oregon-postgres.render.com
-    app_port: 3000
-    app_dir: /opt/stage_5b
-    log_dir: /var/log/stage_5b
+    app_dir: "/opt/stage_5b"
+    pg_pw_file: "/var/secrets/pg_pw.txt"
+    pg_admin_user: "ansible_hng_user"
+    pg_admin_password: "mcyvS9FYs5aVTkFW47W48rZOEmm8hSXM"
+    pg_database: "ansible_hng"
+    log_dir: "/var/log/stage_5b"
 
   tasks:
-    - name: Ensure hng user exists
+    - name: Create hng user with sudo privileges
       user:
         name: hng
         state: present
         groups: sudo
+        append: yes
+
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: yes
 
     - name: Create necessary directories
       file:
         path: "{{ item }}"
         state: directory
-        owner: root
+        owner: hng
         mode: "0755"
       loop:
         - /var/secrets
         - "{{ log_dir }}"
         - "{{ app_dir }}"
 
-    - name: Save PostgreSQL admin credentials
-      copy:
-        dest: "{{ pg_password_file }}"
-        content: "PG_USER={{ pg_user }}\nPG_PASSWORD={{ pg_password }}\nPG_DATABASE={{ pg_database }}\n"
-        owner: root
-        group: root
-        mode: "0600"
-
-    - name: Read PostgreSQL credentials
-      slurp:
-        src: "{{ pg_password_file }}"
-      register: pg_creds
-
-    - name: Set PostgreSQL credentials as variables
-      set_fact:
-        pg_user: "{{ (pg_creds.content | b64decode).split('\n')[0].split('=')[1] }}"
-        pg_password: "{{ (pg_creds.content | b64decode).split('\n')[1].split('=')[1] }}"
-        pg_database: "{{ (pg_creds.content | b64decode).split('\n')[2].split('=')[1] }}"
-
-    - name: Update and upgrade apt packages
-      apt:
-        update_cache: yes
-        upgrade: dist
-
-    - name: Add NodeSource repository for Node.js
-      shell: curl -sL https://deb.nodesource.com/setup_18.x | bash -
-      args:
-        executable: /bin/bash
-
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-
-    - name: Install necessary packages
+    - name: Install required packages
       apt:
         name:
           - git
           - postgresql
           - nginx
-          - rabbitmq-server
           - nodejs
+          - npm
+          - rabbitmq-server
+          - acl
         state: present
+        update_cache: yes
 
-    - name: Check if repository already exists
-      stat:
-        path: "{{ app_dir }}/.git"
-      register: repo_exists
+    - name: Mark repository directory as safe
+      shell: git config --global --add safe.directory "{{ app_dir }}"
+      args:
+        executable: /bin/bash
 
-    - name: Clone the boilerplate repository
+    - name: Clone or update the repository
       git:
         repo: https://github.com/hngprojects/hng_boilerplate_nestjs.git
         dest: "{{ app_dir }}"
         version: devops
-      become: yes
-      become_user: root
-      when: not repo_exists.stat.exists
+        update: yes
+        accept_hostkey: yes
+        force: yes
 
-    - name: Change ownership of the application directory
+    - name: Ensure app directory is owned by hng user
       file:
         path: "{{ app_dir }}"
         owner: hng
         group: hng
         recurse: yes
 
-    - name: Set correct permissions for app directory
-      file:
-        path: "{{ app_dir }}"
-        owner: hng
-        group: hng
-        mode: "0755"
-        recurse: yes
-
-    - name: Create .env file
+    - name: Create the .env file
       copy:
         dest: "{{ app_dir }}/.env"
         content: |
           PROFILE=local
           NODE_ENV=development
           PORT=3000
-          DB_USERNAME=db_one_xysq_user
-          DB_PASSWORD=fgYiwwTsuMhfosq3NMgBa2xToWFMIqDq
-          DB_DATABASE=db_one_xysq
-          DB_HOST=dpg-cqc2ds2j1k6c73fs2r20-a.oregon-postgres.render.com
+          DB_USERNAME=ansible_hng_user
+          DB_PASSWORD=mcyvS9FYs5aVTkFW47W48rZOEmm8hSXM
+          DB_DATABASE=ansible_hng
+          DB_HOST=dpg-cqkcj5rqf0us73c785ug-a.oregon-postgres.render.com
           DB_PORT=5432
           DB_ENTITIES=dist/src/modules/**/entities/**/*.entity{.ts,.js}
           DB_MIGRATIONS=dist/**/migrations/*{.ts,.js}
@@ -125,55 +91,71 @@
         mode: "0600"
 
     - name: Install application dependencies
+      npm:
+        path: "{{ app_dir }}/*package"
+        state: present
+
+    - name: Start PostgreSQL service
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Save PostgreSQL admin credentials
+      copy:
+        content: "PGUSER={{ pg_admin_user }}\nPGPASSWORD={{ pg_admin_password }}"
+        dest: "{{ pg_pw_file }}"
+        owner: hng
+        group: hng
+        mode: "0600"
+
+    - name: Create PostgreSQL database and user
+      become_user: postgres
       shell: |
-        su - hng -c "cd {{ app_dir }} && npm install"
+        psql -c "CREATE USER {{ pg_admin_user }} WITH PASSWORD '{{ pg_admin_password }}';" || true
+        psql -c "CREATE DATABASE {{ pg_database }} OWNER {{ pg_admin_user }};" || true
+        psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ pg_database }} TO {{ pg_admin_user }};"
       args:
         executable: /bin/bash
-      become: yes
 
-    - name: Ensure application runs on port 3000
+    - name: Start the application on port 3000
       shell: |
         su - hng -c "cd {{ app_dir }} && nohup npm start > {{ log_dir }}/out.log 2> {{ log_dir }}/error.log &"
       args:
         executable: /bin/bash
-      become: yes
 
-    - name: Configure Nginx
+    - name: Create Nginx configuration
       copy:
-        dest: /etc/nginx/sites-available/default
         content: |
           server {
               listen 80;
               server_name _;
               location / {
-                  proxy_pass http://127.0.0.1:{{ app_port }};
+                  proxy_pass http://127.0.0.1:3000;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto $scheme;
               }
           }
-      notify:
-        - Reload Nginx
-
-    - name: Ensure log files are owned by hng user
-      file:
-        path: "{{ item }}"
-        owner: hng
-        group: hng
-        state: touch
+        dest: /etc/nginx/sites-available/default
+        owner: root
+        group: root
         mode: "0644"
-      loop:
-        - "{{ log_dir }}/error.log"
-        - "{{ log_dir }}/out.log"
 
-    - name: Ensure services are running
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: Check if the services are running
       service:
         name: "{{ item }}"
         state: started
+        enabled: yes
       loop:
-        - postgresql
         - nginx
+        - postgresql
         - rabbitmq-server
 
   handlers:
