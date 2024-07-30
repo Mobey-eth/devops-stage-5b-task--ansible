@@ -4,10 +4,9 @@
   become: yes
   vars:
     pg_password_file: /var/secrets/pg_pw.txt
-    pg_user: db_one_xysq_user
-    pg_password: fgYiwwTsuMhfosq3NMgBa2xToWFMIqDq
-    pg_database: db_one_xysq
-    pg_host: dpg-cqc2ds2j1k6c73fs2r20-a.oregon-postgres.render.com
+    pg_user: postgresadmin
+    pg_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=16') }}"
+    pg_database: nestjsdb
     app_port: 3000
     app_dir: /opt/stage_5b
     log_dir: /var/log/stage_5b
@@ -30,6 +29,38 @@
         - "{{ log_dir }}"
         - "{{ app_dir }}"
 
+    - name: Install PostgreSQL
+      apt:
+        name:
+          - postgresql
+          - postgresql-contrib
+          - python3-psycopg2
+        state: present
+
+    - name: Ensure PostgreSQL is started
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Create PostgreSQL user
+      become: yes
+      command: sudo -u postgres psql -c "CREATE USER {{ pg_user }} WITH PASSWORD '{{ pg_password }}' CREATEDB SUPERUSER;"
+      register: create_user_result
+      changed_when: "'CREATE ROLE' in create_user_result.stdout"
+      failed_when:
+        - create_user_result.rc != 0
+        - "'already exists' not in create_user_result.stderr"
+
+    - name: Create PostgreSQL database
+      become: yes
+      command: sudo -u postgres psql -c "CREATE DATABASE {{ pg_database }} OWNER {{ pg_user }};"
+      register: create_db_result
+      changed_when: "'CREATE DATABASE' in create_db_result.stdout"
+      failed_when:
+        - create_db_result.rc != 0
+        - "'already exists' not in create_db_result.stderr"
+
     - name: Save PostgreSQL admin credentials
       copy:
         dest: "{{ pg_password_file }}"
@@ -37,17 +68,6 @@
         owner: root
         group: root
         mode: "0600"
-
-    - name: Read PostgreSQL credentials
-      slurp:
-        src: "{{ pg_password_file }}"
-      register: pg_creds
-
-    - name: Set PostgreSQL credentials as variables
-      set_fact:
-        pg_user: "{{ (pg_creds.content | b64decode).split('\n')[0].split('=')[1] }}"
-        pg_password: "{{ (pg_creds.content | b64decode).split('\n')[1].split('=')[1] }}"
-        pg_database: "{{ (pg_creds.content | b64decode).split('\n')[2].split('=')[1] }}"
 
     - name: Update and upgrade apt packages
       apt:
@@ -67,7 +87,6 @@
       apt:
         name:
           - git
-          - postgresql
           - nginx
           - rabbitmq-server
           - nodejs
@@ -109,15 +128,15 @@
           PROFILE=local
           NODE_ENV=development
           PORT=3000
-          DB_USERNAME=db_one_xysq_user
-          DB_PASSWORD=fgYiwwTsuMhfosq3NMgBa2xToWFMIqDq
-          DB_DATABASE=db_one_xysq
-          DB_HOST=dpg-cqc2ds2j1k6c73fs2r20-a.oregon-postgres.render.com
+          DB_USERNAME={{ pg_user }}
+          DB_PASSWORD={{ pg_password }}
+          DB_DATABASE={{ pg_database }}
+          DB_HOST=localhost
           DB_PORT=5432
           DB_ENTITIES=dist/src/modules/**/entities/**/*.entity{.ts,.js}
           DB_MIGRATIONS=dist/**/migrations/*{.ts,.js}
           DB_TYPE=postgres
-          DB_SSL=true
+          DB_SSL=false
           JWT_SECRET=someSecrets
           JWT_EXPIRY_TIMEFRAME=3600
         owner: hng
