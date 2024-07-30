@@ -1,6 +1,4 @@
-Here's a README for your project based on the information you've provided:
 
-```markdown
 # NestJS Backend Deployment with Ansible
 
 This project automates the deployment of a NestJS backend application using Ansible. It sets up a server with all necessary dependencies, configures the environment, and deploys the application.
@@ -41,22 +39,6 @@ The Ansible playbook performs the following main steps:
 9. Configures Nginx as a reverse proxy
 10. Ensures all required services are running
 
-## Environment Configuration
-
-The application uses the following environment variables:
-
-- PROFILE: local
-- NODE_ENV: development
-- PORT: 3000
-- DB_USERNAME: db_one_xysq_user
-- DB_PASSWORD: [redacted]
-- DB_DATABASE: db_one_xysq
-- DB_HOST: dpg-cqc2ds2j1k6c73fs2r20-a.oregon-postgres.render.com
-- DB_PORT: 5432
-- DB_TYPE: postgres
-- DB_SSL: true
-- JWT_SECRET: someSecrets
-- JWT_EXPIRY_TIMEFRAME: 3600
 
 ## Running the Deployment
 
@@ -75,10 +57,4 @@ Application logs are stored in the following locations:
 - Error logs: /var/log/stage_5b/error.log
 - Output logs: /var/log/stage_5b/out.log
 
-## Security Note
 
-This README contains sensitive information (like database credentials). In a real-world scenario, you should never include such information in your README or commit it to version control. Instead, use environment variables or secure secret management systems.
-
-## Support
-
-For any issues or questions, please open an issue in the project repository.
