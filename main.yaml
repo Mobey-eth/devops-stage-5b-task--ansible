@@ -24,7 +24,7 @@
         path: "{{ item }}"
         state: directory
         owner: root
-        mode: '0755'
+        mode: "0755"
       loop:
         - /var/secrets
         - "{{ log_dir }}"
@@ -36,7 +36,7 @@
         content: "PG_USER={{ pg_user }}\nPG_PASSWORD={{ pg_password }}\nPG_DATABASE={{ pg_database }}\n"
         owner: root
         group: root
-        mode: '0600'
+        mode: "0600"
 
     - name: Read PostgreSQL credentials
       slurp:
@@ -99,7 +99,7 @@
         path: "{{ app_dir }}"
         owner: hng
         group: hng
-        mode: '0755'
+        mode: "0755"
         recurse: yes
 
     - name: Create .env file
@@ -122,7 +122,7 @@
           JWT_EXPIRY_TIMEFRAME=3600
         owner: hng
         group: hng
-        mode: '0600'
+        mode: "0600"
 
     - name: Install application dependencies
       shell: |
@@ -162,7 +162,7 @@
         owner: hng
         group: hng
         state: touch
-        mode: '0644'
+        mode: "0644"
       loop:
         - "{{ log_dir }}/error.log"
         - "{{ log_dir }}/out.log"
