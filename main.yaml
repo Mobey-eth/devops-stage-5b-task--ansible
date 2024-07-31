@@ -5,9 +5,9 @@
   vars:
     app_dir: "/opt/stage_5b"
     pg_pw_file: "/var/secrets/pg_pw.txt"
-    pg_admin_user: "ansible_hng_user"
-    pg_admin_password: "mcyvS9FYs5aVTkFW47W48rZOEmm8hSXM"
-    pg_database: "ansible_hng"
+    pg_admin_user: "username"
+    pg_admin_password: "password"
+    pg_database: "database"
     log_dir: "/var/log/stage_5b"
 
   tasks:
@@ -39,13 +39,19 @@
         name:
           - git
           - postgresql
+          - postgresql-client
           - nginx
-          - nodejs
-          - npm
           - rabbitmq-server
           - acl
         state: present
         update_cache: yes
+
+    - name: Install Node.js and npm from NodeSource
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
+        apt-get install -y nodejs
+      args:
+        executable: /bin/bash
 
     - name: Mark repository directory as safe
       shell: git config --global --add safe.directory "{{ app_dir }}"
@@ -75,15 +81,15 @@
           PROFILE=local
           NODE_ENV=development
           PORT=3000
-          DB_USERNAME=ansible_hng_user
-          DB_PASSWORD=mcyvS9FYs5aVTkFW47W48rZOEmm8hSXM
-          DB_DATABASE=ansible_hng
-          DB_HOST=dpg-cqkcj5rqf0us73c785ug-a.oregon-postgres.render.com
+          DB_USERNAME={{ pg_admin_user }}
+          DB_PASSWORD={{ pg_admin_password }}
+          DB_DATABASE={{ pg_database }}
+          DB_HOST=localhost
           DB_PORT=5432
           DB_ENTITIES=dist/src/modules/**/entities/**/*.entity{.ts,.js}
           DB_MIGRATIONS=dist/**/migrations/*{.ts,.js}
           DB_TYPE=postgres
-          DB_SSL=true
+          DB_SSL=false
           JWT_SECRET=someSecrets
           JWT_EXPIRY_TIMEFRAME=3600
         owner: hng
@@ -109,14 +115,36 @@
         group: hng
         mode: "0600"
 
-    - name: Create PostgreSQL database and user
+    - name: Check if PostgreSQL user exists
       become_user: postgres
       shell: |
-        psql -c "CREATE USER {{ pg_admin_user }} WITH PASSWORD '{{ pg_admin_password }}';" || true
-        psql -c "CREATE DATABASE {{ pg_database }} OWNER {{ pg_admin_user }};" || true
+        psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='{{ pg_admin_user }}'" | grep -q 1
+      register: user_exists
+      ignore_errors: yes
+
+    - name: Create PostgreSQL user if it does not exist
+      become_user: postgres
+      shell: |
+        psql -c "CREATE USER {{ pg_admin_user }} WITH PASSWORD '{{ pg_admin_password }}';"
+      when: user_exists.failed
+
+    - name: Check if PostgreSQL database exists
+      become_user: postgres
+      shell: |
+        psql -tAc "SELECT 1 FROM pg_database WHERE datname='{{ pg_database }}'" | grep -q 1
+      register: db_exists
+      ignore_errors: yes
+
+    - name: Create PostgreSQL database if it does not exist
+      become_user: postgres
+      shell: |
+        psql -c "CREATE DATABASE {{ pg_database }} OWNER {{ pg_admin_user }};"
+      when: db_exists.failed
+
+    - name: Grant all privileges on the database to the user
+      become_user: postgres
+      shell: |
         psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ pg_database }} TO {{ pg_admin_user }};"
-      args:
-        executable: /bin/bash
 
     - name: Start the application on port 3000
       shell: |
@@ -148,7 +176,7 @@
         name: nginx
         state: restarted
 
-    - name: Check if the services are running
+    - name: Ensure services are enabled and running
       service:
         name: "{{ item }}"
         state: started
