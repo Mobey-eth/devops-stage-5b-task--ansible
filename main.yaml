@@ -1,5 +1,5 @@
 ---
-- name: Automated Deployment and Configuration
+- name: Automated Deployment and Configuration with Ansible
   hosts: hng
   become: yes
   vars:
@@ -11,7 +11,7 @@
     log_dir: "/var/log/stage_5b"
 
   tasks:
-    - name: Create hng user with sudo privileges
+    - name: Creating a hng user with sudo privileges
       user:
         name: hng
         state: present
@@ -23,7 +23,7 @@
         update_cache: yes
         upgrade: yes
 
-    - name: Create necessary directories
+    - name: Create required directories
       file:
         path: "{{ item }}"
         state: directory
@@ -46,7 +46,7 @@
         state: present
         update_cache: yes
 
-    - name: Install Node.js and npm from NodeSource
+    - name: Add NodeSource repository for Node.js
       shell: |
         curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
         apt-get install -y nodejs
@@ -96,7 +96,7 @@
         group: hng
         mode: "0600"
 
-    - name: Install application dependencies
+    - name: Installing app dependencies
       npm:
         path: "{{ app_dir }}/*package"
         state: present
@@ -122,7 +122,7 @@
       register: user_exists
       ignore_errors: yes
 
-    - name: Create PostgreSQL user if it does not exist
+    - name: Create PostgreSQL user if it doesn't exist
       become_user: postgres
       shell: |
         psql -c "CREATE USER {{ pg_admin_user }} WITH PASSWORD '{{ pg_admin_password }}';"
@@ -141,12 +141,12 @@
         psql -c "CREATE DATABASE {{ pg_database }} OWNER {{ pg_admin_user }};"
       when: db_exists.failed
 
-    - name: Grant all privileges on the database to the user
+    - name: Grant privileges on the database to the user
       become_user: postgres
       shell: |
         psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ pg_database }} TO {{ pg_admin_user }};"
 
-    - name: Start the application on port 3000
+    - name: Ensure app starts on port 3000
       shell: |
         su - hng -c "cd {{ app_dir }} && nohup npm start > {{ log_dir }}/out.log 2> {{ log_dir }}/error.log &"
       args:
@@ -171,7 +171,7 @@
         group: root
         mode: "0644"
 
-    - name: Restart Nginx
+    - name: Restarting Nginx
       service:
         name: nginx
         state: restarted
